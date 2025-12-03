@@ -94,6 +94,10 @@ const Index = () => {
   const [keys, setKeys] = useState<Set<string>>(new Set());
   const [selectedSlot, setSelectedSlot] = useState(0);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
+  const [showMenu, setShowMenu] = useState(true);
+  const [touchStart, setTouchStart] = useState({ x: 0, y: 0 });
+  const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
+  const [isTouching, setIsTouching] = useState(false);
 
   useEffect(() => {
     const terrain = generateTerrain();
@@ -154,9 +158,9 @@ const Index = () => {
     };
 
     const handleClick = () => {
-      if (document.pointerLockElement !== canvas) {
+      if (document.pointerLockElement !== canvas && !showMenu) {
         canvas.requestPointerLock();
-      } else {
+      } else if (document.pointerLockElement === canvas) {
         const lookVector = {
           x: Math.sin(camera.rotY) * Math.cos(camera.rotX),
           y: Math.sin(camera.rotX),
@@ -366,18 +370,53 @@ const Index = () => {
         className="w-full h-full cursor-crosshair"
       />
       
-      {!isPointerLocked && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <Card className="p-8 bg-black/80 backdrop-blur-sm border-purple-500/50 pointer-events-auto">
-            <div className="text-center space-y-4">
-              <h1 className="text-4xl font-bold text-white mb-2">Майнкрафт 3D</h1>
-              <p className="text-gray-300">Кликните, чтобы начать игру</p>
-              <div className="text-sm text-gray-400 space-y-1">
-                <p>WASD - движение</p>
-                <p>Мышь - осмотр</p>
-                <p>ЛКМ - разрушить блок</p>
-                <p>1-4 - выбор слота</p>
-              </div>
+      {showMenu && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-sky-400 to-sky-600">
+          <Card className="w-full max-w-md mx-4 bg-black/80 backdrop-blur-sm border-purple-500/50">
+            <div className="p-8 space-y-6">
+              <h1 className="text-5xl font-bold text-white text-center mb-8">Майнкрафт</h1>
+              
+              <button
+                onClick={() => {
+                  setShowMenu(false);
+                  const terrain = generateTerrain();
+                  setBlocks(terrain);
+                  const initialMobs: Mob[] = [];
+                  for (let i = 0; i < 5; i++) {
+                    initialMobs.push({
+                      id: i,
+                      x: Math.random() * 20 - 10,
+                      y: 5,
+                      z: Math.random() * 20 - 10,
+                      health: 20,
+                      type: Math.random() > 0.5 ? 'zombie' : 'skeleton',
+                    });
+                  }
+                  setMobs(initialMobs);
+                }}
+                className="w-full py-4 px-6 bg-green-600 hover:bg-green-700 text-white text-xl font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                <Icon name="Gamepad2" size={24} />
+                Одиночная игра
+              </button>
+              
+              <button
+                disabled
+                className="w-full py-4 px-6 bg-gray-600/50 text-gray-400 text-xl font-semibold rounded-lg cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Icon name="Users" size={24} />
+                Мультиплеер
+                <span className="text-sm">(скоро)</span>
+              </button>
+              
+              <button
+                disabled
+                className="w-full py-4 px-6 bg-gray-600/50 text-gray-400 text-xl font-semibold rounded-lg cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Icon name="Wrench" size={24} />
+                Креатив
+                <span className="text-sm">(скоро)</span>
+              </button>
             </div>
           </Card>
         </div>
@@ -420,6 +459,121 @@ const Index = () => {
           </div>
         </Card>
       </div>
+
+      {!showMenu && (
+        <>
+          <div className="absolute bottom-32 left-8 w-32 h-32 md:hidden">
+            <div className="relative w-full h-full bg-black/40 backdrop-blur-sm rounded-full border-2 border-gray-600">
+              <div
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 bg-purple-500/60 rounded-full transition-transform"
+                style={{
+                  transform: `translate(calc(-50% + ${joystickPos.x * 30}px), calc(-50% + ${joystickPos.y * 30}px))`
+                }}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  setIsTouching(true);
+                  const touch = e.touches[0];
+                  setTouchStart({ x: touch.clientX, y: touch.clientY });
+                }}
+                onTouchMove={(e) => {
+                  if (!isTouching) return;
+                  e.preventDefault();
+                  const touch = e.touches[0];
+                  const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+                  const centerX = rect.left + rect.width / 2;
+                  const centerY = rect.top + rect.height / 2;
+                  const deltaX = (touch.clientX - centerX) / 40;
+                  const deltaY = (touch.clientY - centerY) / 40;
+                  const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                  const maxDistance = 1;
+                  if (distance > maxDistance) {
+                    setJoystickPos({ x: (deltaX / distance) * maxDistance, y: (deltaY / distance) * maxDistance });
+                  } else {
+                    setJoystickPos({ x: deltaX, y: deltaY });
+                  }
+                  
+                  const angle = Math.atan2(deltaX, deltaY);
+                  const speed = Math.min(distance, maxDistance) * 0.15;
+                  setCamera(prev => ({
+                    ...prev,
+                    x: prev.x + Math.sin(prev.rotY + angle) * speed,
+                    z: prev.z + Math.cos(prev.rotY + angle) * speed,
+                  }));
+                }}
+                onTouchEnd={() => {
+                  setIsTouching(false);
+                  setJoystickPos({ x: 0, y: 0 });
+                }}
+              >
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Icon name="Move" size={24} className="text-white" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="absolute bottom-32 right-8 md:hidden">
+            <button
+              onTouchStart={(e) => {
+                e.preventDefault();
+                const lookVector = {
+                  x: Math.sin(camera.rotY) * Math.cos(camera.rotX),
+                  y: Math.sin(camera.rotX),
+                  z: Math.cos(camera.rotY) * Math.cos(camera.rotX),
+                };
+
+                for (let dist = 0; dist < 5; dist += 0.2) {
+                  const checkX = Math.round(camera.x + lookVector.x * dist);
+                  const checkY = Math.round(camera.y + lookVector.y * dist);
+                  const checkZ = Math.round(camera.z + lookVector.z * dist);
+
+                  const blockIndex = blocks.findIndex(
+                    b => Math.round(b.x) === checkX && Math.round(b.y) === checkY && Math.round(b.z) === checkZ
+                  );
+
+                  if (blockIndex !== -1) {
+                    const removedBlock = blocks[blockIndex];
+                    setBlocks(prev => prev.filter((_, i) => i !== blockIndex));
+                    setInventory(prev => {
+                      const itemIndex = prev.findIndex(item => item.type === removedBlock.type);
+                      if (itemIndex !== -1) {
+                        const updated = [...prev];
+                        updated[itemIndex].count++;
+                        return updated;
+                      }
+                      return prev;
+                    });
+                    break;
+                  }
+                }
+              }}
+              className="w-20 h-20 bg-red-600/60 backdrop-blur-sm rounded-full flex items-center justify-center border-2 border-red-500 active:bg-red-700/80 transition-colors"
+            >
+              <Icon name="Pickaxe" size={32} className="text-white" />
+            </button>
+          </div>
+
+          <div
+            className="absolute top-0 right-0 w-1/2 h-full md:hidden"
+            onTouchMove={(e) => {
+              if (showMenu) return;
+              const touch = e.touches[0];
+              const deltaX = touch.clientX - touchStart.x;
+              const deltaY = touch.clientY - touchStart.y;
+              setCamera(prev => ({
+                ...prev,
+                rotY: (prev.rotY - deltaX * 0.005) % (Math.PI * 2),
+                rotX: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.rotX - deltaY * 0.005)),
+              }));
+              setTouchStart({ x: touch.clientX, y: touch.clientY });
+            }}
+            onTouchStart={(e) => {
+              const touch = e.touches[0];
+              setTouchStart({ x: touch.clientX, y: touch.clientY });
+            }}
+          />
+        </>
+      )}
     </div>
   );
 };
