@@ -24,54 +24,45 @@ interface Mob {
   type: 'zombie' | 'skeleton';
 }
 
-const CHUNK_SIZE = 20;
-const RENDER_DISTANCE = 15;
+const CHUNK_SIZE = 16;
+const RENDER_DISTANCE = 12;
 const BLOCK_SIZE = 40;
 
 const generateTerrain = (): Block[] => {
   const blocks: Block[] = [];
+  const seed = Math.floor(Math.random() * 10000);
   
   for (let x = -CHUNK_SIZE; x < CHUNK_SIZE; x++) {
     for (let z = -CHUNK_SIZE; z < CHUNK_SIZE; z++) {
-      const distanceFromCenter = Math.sqrt(x * x + z * z);
-      const biomeNoise = Math.sin(x * 0.1) * Math.cos(z * 0.1);
+      const biomeNoise = Math.sin(x * 0.15 + seed) * Math.cos(z * 0.15 + seed);
+      const heightNoise = Math.sin(x * 0.25) * Math.cos(z * 0.25) + Math.sin(x * 0.1) * 0.5;
       
       let biome: 'plains' | 'desert' | 'forest' | 'mountains' = 'plains';
-      if (biomeNoise > 0.5) biome = 'desert';
-      else if (biomeNoise < -0.5) biome = 'forest';
-      else if (distanceFromCenter > 15) biome = 'mountains';
+      if (biomeNoise > 0.4) biome = 'desert';
+      else if (biomeNoise < -0.4) biome = 'forest';
+      else if (Math.abs(x) > 12 || Math.abs(z) > 12) biome = 'mountains';
       
-      const heightNoise = Math.sin(x * 0.3) * Math.cos(z * 0.3) * 2;
-      let height = Math.floor(3 + heightNoise);
+      let height = Math.floor(3 + heightNoise * 1.5);
       
-      if (biome === 'mountains') height += 4;
-      if (biome === 'desert') height -= 1;
+      if (biome === 'mountains') height += 3;
+      if (biome === 'desert') height = Math.max(2, height - 1);
       
-      for (let y = 0; y < height; y++) {
-        let blockType: Block['type'] = 'dirt';
-        
-        if (y === height - 1) {
-          if (biome === 'desert') blockType = 'sand';
-          else if (biome === 'forest' || biome === 'plains') blockType = 'grass';
-          else blockType = 'stone';
-        } else if (y < height - 3) {
-          blockType = 'stone';
-        }
-        
-        blocks.push({ type: blockType, x, y, z });
+      const topBlock = biome === 'desert' ? 'sand' : biome === 'mountains' ? 'stone' : 'grass';
+      blocks.push({ type: topBlock, x, y: height - 1, z });
+      
+      for (let y = 0; y < height - 1; y++) {
+        blocks.push({ type: y < height - 3 ? 'stone' : 'dirt', x, y, z });
       }
       
-      if (biome === 'forest' && Math.random() > 0.85) {
-        for (let ty = height; ty < height + 4; ty++) {
-          blocks.push({ type: 'wood', x, y: ty, z });
+      if (biome === 'forest' && (x + z * 7 + seed) % 11 === 0) {
+        for (let ty = 0; ty < 3; ty++) {
+          blocks.push({ type: 'wood', x, y: height + ty, z });
         }
-        for (let lx = -1; lx <= 1; lx++) {
-          for (let lz = -1; lz <= 1; lz++) {
-            if (Math.abs(lx) + Math.abs(lz) <= 1) {
-              blocks.push({ type: 'leaves', x: x + lx, y: height + 4, z: z + lz });
-            }
-          }
-        }
+        blocks.push({ type: 'leaves', x, y: height + 3, z });
+        blocks.push({ type: 'leaves', x: x + 1, y: height + 2, z });
+        blocks.push({ type: 'leaves', x: x - 1, y: height + 2, z });
+        blocks.push({ type: 'leaves', x, y: height + 2, z: z + 1 });
+        blocks.push({ type: 'leaves', x, y: height + 2, z: z - 1 });
       }
     }
   }
@@ -99,23 +90,16 @@ const Index = () => {
   const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
   const [isTouching, setIsTouching] = useState(false);
 
+  const blocksRef = useRef<Block[]>([]);
+  const mobsRef = useRef<Mob[]>([]);
+
   useEffect(() => {
-    const terrain = generateTerrain();
-    setBlocks(terrain);
-    
-    const initialMobs: Mob[] = [];
-    for (let i = 0; i < 5; i++) {
-      initialMobs.push({
-        id: i,
-        x: Math.random() * 20 - 10,
-        y: 5,
-        z: Math.random() * 20 - 10,
-        health: 20,
-        type: Math.random() > 0.5 ? 'zombie' : 'skeleton',
-      });
+    if (blocks.length === 0 && !showMenu) {
+      const terrain = generateTerrain();
+      setBlocks(terrain);
+      blocksRef.current = terrain;
     }
-    setMobs(initialMobs);
-  }, []);
+  }, [showMenu]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -172,13 +156,17 @@ const Index = () => {
           const checkY = Math.round(camera.y + lookVector.y * dist);
           const checkZ = Math.round(camera.z + lookVector.z * dist);
 
-          const blockIndex = blocks.findIndex(
+          const currentBlocks = blocksRef.current.length > 0 ? blocksRef.current : blocks;
+          const blockIndex = currentBlocks.findIndex(
             b => Math.round(b.x) === checkX && Math.round(b.y) === checkY && Math.round(b.z) === checkZ
           );
 
           if (blockIndex !== -1) {
-            const removedBlock = blocks[blockIndex];
-            setBlocks(prev => prev.filter((_, i) => i !== blockIndex));
+            const removedBlock = currentBlocks[blockIndex];
+            const newBlocks = currentBlocks.filter((_, i) => i !== blockIndex);
+            blocksRef.current = newBlocks;
+            setBlocks(newBlocks);
+            
             setInventory(prev => {
               const itemIndex = prev.findIndex(item => item.type === removedBlock.type);
               if (itemIndex !== -1) {
@@ -276,14 +264,22 @@ const Index = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    let animationId: number;
     const render = () => {
       ctx.fillStyle = '#87CEEB';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+      const visibleBlocks = blocksRef.current.length > 0 ? blocksRef.current : blocks;
+      
       const allObjects = [
-        ...blocks.map(b => ({ ...b, isMob: false })),
+        ...visibleBlocks.map(b => ({ ...b, isMob: false })),
         ...mobs.map(m => ({ x: m.x, y: m.y, z: m.z, type: m.type as any, isMob: true, mob: m }))
       ];
+
+      const cosY = Math.cos(camera.rotY);
+      const sinY = Math.sin(camera.rotY);
+      const cosX = Math.cos(camera.rotX);
+      const sinX = Math.sin(camera.rotX);
 
       const projected = allObjects
         .map(obj => {
@@ -291,18 +287,14 @@ const Index = () => {
           const dy = obj.y - camera.y;
           const dz = obj.z - camera.z;
           
-          const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          if (distance > RENDER_DISTANCE) return null;
+          const distSq = dx * dx + dy * dy + dz * dz;
+          if (distSq > RENDER_DISTANCE * RENDER_DISTANCE) return null;
 
-          const cosY = Math.cos(camera.rotY);
-          const sinY = Math.sin(camera.rotY);
           const rx = dx * cosY - dz * sinY;
           const rz = dx * sinY + dz * cosY;
 
           if (rz < 0.1) return null;
 
-          const cosX = Math.cos(camera.rotX);
-          const sinX = Math.sin(camera.rotX);
           const ry = dy * cosX - rz * sinX;
 
           const scale = (canvas.height / 2) / rz;
@@ -310,7 +302,7 @@ const Index = () => {
           const screenY = canvas.height / 2 - ry * scale;
           const size = BLOCK_SIZE * scale;
 
-          return { obj, screenX, screenY, size, distance };
+          return { obj, screenX, screenY, size, distance: distSq };
         })
         .filter(p => p !== null)
         .sort((a, b) => b!.distance - a!.distance);
@@ -357,8 +349,13 @@ const Index = () => {
       ctx.stroke();
     };
 
-    const animationFrame = setInterval(render, 16);
-    return () => clearInterval(animationFrame);
+    const animate = () => {
+      render();
+      animationId = requestAnimationFrame(animate);
+    };
+    animate();
+    
+    return () => cancelAnimationFrame(animationId);
   }, [blocks, camera, mobs]);
 
   return (
@@ -527,13 +524,17 @@ const Index = () => {
                   const checkY = Math.round(camera.y + lookVector.y * dist);
                   const checkZ = Math.round(camera.z + lookVector.z * dist);
 
-                  const blockIndex = blocks.findIndex(
+                  const currentBlocks = blocksRef.current.length > 0 ? blocksRef.current : blocks;
+                  const blockIndex = currentBlocks.findIndex(
                     b => Math.round(b.x) === checkX && Math.round(b.y) === checkY && Math.round(b.z) === checkZ
                   );
 
                   if (blockIndex !== -1) {
-                    const removedBlock = blocks[blockIndex];
-                    setBlocks(prev => prev.filter((_, i) => i !== blockIndex));
+                    const removedBlock = currentBlocks[blockIndex];
+                    const newBlocks = currentBlocks.filter((_, i) => i !== blockIndex);
+                    blocksRef.current = newBlocks;
+                    setBlocks(newBlocks);
+                    
                     setInventory(prev => {
                       const itemIndex = prev.findIndex(item => item.type === removedBlock.type);
                       if (itemIndex !== -1) {
